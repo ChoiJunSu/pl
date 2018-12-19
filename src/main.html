@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+    <meta charset="utf-8" http-equiv="encoding">
+    <title>Sclab_Lifelog_demo</title>
+
+    <script src="../dist/moment.min.js"></script>
+    <script src="../dist/jquery.min.js"></script>
+    <script src="../dist/jquery.daterangepicker.min.js"></script>
+    <script src="../dist/jquery.csv.js"></script>
+    <script src="../dist/vis.js"></script>
+    <script src="elements/Node.js"></script>
+    <script src="elements/Relation.js"></script>
+    <script src="network/SNmanager.js"></script>
+    <script src="util/Util.js"></script>
+    <script src="UserInterface/Timeline.js"></script>
+
+    <link href="../dist/daterangepicker.min.css" rel="stylesheet" type="text/css" />
+    <link href="../dist/vis.css" rel="stylesheet" type="text/css" />
+    <link href="../dist/vis-timeline-graph2d.min.css" rel="stylesheet" type="text/css" />
+    <link href="main.css" rel="stylesheet" type="text/css" />
+
+    <script type="text/javascript">
+        // 이 안에서 vis 라이브러리를 사용해 코딩하면됨
+        var manager = null;
+        var timeline = new Timeline();
+
+        var network = null;
+        var nodes = null;
+        var edges = null;
+
+        //시각화 초기값
+        $(document).ready(() => {
+            draw_network();
+            draw_timeline();
+            $('#date').dateRangePicker();
+        });
+
+
+        //fuction1: 타임라인 시각화 함수
+        function draw_timeline(){
+            try {
+                var timeline_container = document.getElementById('timeline_visualization');
+                if (manager == null) {
+                    timeline.init(null);
+                }
+                else {
+                    timeline.init(manager.gss);
+                }
+                timeline.draw(timeline_container);
+            } catch (error) {
+                console.log(error)
+            }
+        }
+
+        //fuction2: 네트워크 시각화 함수
+        function draw_network(){
+            if (network != null) {
+                network.destroy();
+                network = null;
+            }
+            var container = document.getElementById("networkViewer");
+            //네트워크 초기에 'loading' 보여줌
+            if (nodes == null && edges == null) {
+                var data = {
+                    nodes: [{
+                        id: 0,
+                        title: "Loading",
+                        label: "Loading"
+                    }], edges: []
+                };
+                network = new vis.Network(container, data, {});
+                return;
+            }
+            //네트워크 시각화 옵션(크기, 색상)
+            var options = {
+                nodes: {
+                    shape: 'dot',
+                    color: 'rgba(50, 50, 50, 1)',
+                    size: 16
+                },
+                layout: {
+                    randomSeed: 20,
+                    improvedLayout: true
+                },
+                physics: true,
+                interaction: {
+                    tooltipDelay: 200,
+                    hideEdgesOnDrag: false
+                }
+            };
+
+            var data = {nodes: nodes, edges: edges}
+
+            //네트워크 구조에 데이터 추가
+            network = new vis.Network(container, data, options);
+            network.on("click", addNode);
+            network.fit();
+        }
+
+        //fuction3: 사용자 입력에 따른 데이터 로드 함수. Load 버튼 누를 시 작동.
+        function loadData(){
+            $("#date").attr("disabled", true);
+            $("#personIndex").attr("disabled", true);
+            $("#loadNode").attr("disabled", true);
+            $("#resetNode").attr("disabled", false);
+            $("#searchNode").attr("disabled", false);
+
+            var range = $("#date").val();
+            var start_date = new Date(range.split(' ')[0]);
+            var end_date = new Date(range.split(' ')[2]);
+
+            var days = (end_date - start_date) / (1000 * 60 * 60 * 24);
+            DATASET = SclabUtil.readInputFile(range.split(' ')[0], days + 1, $("#personIndex").val());
+            manager = new SNmanager(DATASET[0]);
+            manager.init();
+            DATASET.shift();
+            manager.makeSN(DATASET);
+
+            timeline.destroy();
+            draw_timeline();
+            resetAllNodes();
+
+
+
+            // 점수 평가 시스템
+            const score = {
+                sleep: [
+                    {'type': '아침형', 'scores': []},
+                    {'type': '저녁형', 'scores': []},
+                    {'type': '불면증', 'scores': []}
+                ],
+                food: [
+                    {'type': '야식증', 'scores': []},
+                    {'type': '거식증', 'scores': []},
+                    {'type': '폭식증', 'scores': []}
+                ],
+                activity: [
+                    {'type': '실내', 'scores': []},
+                    {'type': '실외', 'scores': []},
+                    {'type': '오프라인', 'scores': []},
+                    {'type': '온라인', 'scores': []},
+                    {'type': '내향', 'scores': []},
+                    {'type': '외향', 'scores': []},
+                ]
+                //
+                //     {
+                //     '실내': [],
+                //     '실외': [],
+                //     '오프라인': [],
+                //     '온라인': [],
+                //     '내향': [],
+                //     '외향': []
+                // }
+            }
+
+            // 규칙-수면1 : 일어난 뒤 감정상태
+            var EmotionList = manager.getEmotionAfterWakeUp();
+            console.log('EmotionList')
+            console.log(EmotionList);
+            const emotionIndexList = ['매우 부정', '부정', '보통', '긍정', '매우 긍정']
+            const emotionNumList = [0, 0, 0, 0, 0, 0]
+            for (const emotion of EmotionList) {
+                for (const emotionIndex of emotionIndexList) {
+                    if (emotionIndex == emotion) {
+                        emotionNumList[emotionIndexList.indexOf(emotion)]++     // 특정 개수
+                    }
+                }
+                emotionNumList[5]++     // 총 개수
+            }
+            let ruleSleep1 = '총 ' + emotionNumList[5] + '일 중<br>'
+            for (let i=0; i<emotionIndexList.length; i++) {
+                ruleSleep1 += emotionIndexList[i] + ': ' + emotionNumList[i] + '일<br>'
+                score.sleep[0].scores.push((emotionNumList[3] + emotionNumList[4]) / emotionNumList[5])  // 매우 긍정, 긍정
+                score.sleep[1].scores.push((emotionNumList[0] + emotionNumList[1]) / emotionNumList[5]) // 매우 부정, 부정
+                score.sleep[2].scores.push((emotionNumList[0] + emotionNumList[1]) / emotionNumList[5])
+            }
+            $("#rule_sleep1").html(ruleSleep1);
+
+            //규칙-수면2 : 피로도가 가장 낮은 시간대
+            // 5-8시, 8-10시, 10-17시, 17-20시, 20-5시로 나눠서 개수 세기
+            var TimeList = manager.getTime_BestCondition();
+            console.log("TimeList of best condition")
+            console.log(TimeList)
+            var timeIndexList = ['5시-8시', '8시-10시', '10시-17시', '17시-22시', '22시-5시']
+            var timeNumList = [0, 0, 0, 0, 0, 0]
+            for (const besttime of TimeList) {
+                const time_split = besttime.split(" ")
+                let besttime_hour;
+                try {
+                    //시간 input이 잘못되었을 경우를 대비해 error handling
+                    besttime_hour = time_split[1].split(":")
+                }
+                catch (e) {
+                    break
+                }
+                switch (true) {
+                    // 시간대별 최고의 컨디션 수
+                    case (besttime_hour >= 5) && (besttime_hour < 8) :
+                        timeNumList[0]++;
+                        break;
+                    case (besttime_hour >= 8) && (besttime_hour < 10) :
+                        timeNumList[1]++;
+                        break;
+                    case (besttime_hour >= 10) && (besttime_hour < 17) :
+                        timeNumList[2]++;
+                        break;
+                    case (besttime_hour >= 17) && (besttime_hour < 22) :
+                        timeNumList[3]++;
+                        break;
+                    default:
+                        timeNumList[4]++;
+                        break;
+                }
+                timeNumList[5]++; // 총 수
+            }
+            let ruleSleep2 = '최고의 컨디션 ' + timeNumList[5] + '번 중<br>'
+            for (let i = 0; i < timeIndexList.length; i++) {
+                ruleSleep2 += timeIndexList[i] + ': ' + timeNumList[i] + '번<br>'
+            }
+            $("#rule_sleep2").html(ruleSleep2);
+            score.sleep[0].scores.push((timeNumList[0] + timeNumList[1]) / timeNumList[5])    // 오전
+            score.sleep[1].scores.push((timeNumList[3] + timeNumList[4]) / timeNumList[5])    // 오후
+
+            // 규칙-수면3: 잠들기 직전 1시간 이내 스마트폰 15분 이상 사용 빈도
+            const ruleSleep3 = manager.getSmartphoneUseBeforeSleep()
+            $('#rule_sleep3').html('총 ' + ruleSleep3[1] + '회 중 ' + ruleSleep3[0] + '회<br>비율: ' + ((ruleSleep3[0] / ruleSleep3[1]).toFixed(2)) * 100 + '%')
+            score.sleep[2].scores.push(ruleSleep3[0] / ruleSleep3[1])   // 사용 비율
+
+            // 규칙-수면5: 수면 시간이 4시간보다 짧은 횟수
+            const ruleSleep5 = manager.getSleepTime()
+            $('#rule_sleep4').html('총 ' + ruleSleep5[1] + '번의 수면 중 ' + ruleSleep5[0] + '번은 4시간 이하로 잤다.' + '(약 ' + (ruleSleep5[0] / ruleSleep5[1] * 100).toFixed(0) + '%)')
+            score.sleep[2].scores.push(ruleSleep5[0] / ruleSleep5[1])
+
+            // 규칙-수면6: 수면 시작 시간 분포
+            const TimeList6 = manager.getSleepStartTime()
+            timeIndexList = ['6시-9시', '9시-12시', '12시-3시', '3시-6시']
+            timeNumList = [0, 0, 0, 0, 0]
+            for (const startTime of TimeList6) {
+                switch (true) {
+                    // 시간대별 수면 시작 시간
+                    case (startTime >= 18) && (startTime < 21) :
+                        timeNumList[0]++;
+                        break;
+                    case (startTime >= 21) && (startTime < 24) :
+                        timeNumList[1]++;
+                        break;
+                    case (startTime >= 0) && (startTime < 3) :
+                        timeNumList[2]++;
+                        break;
+                    case (startTime >= 3) && (startTime < 6) :
+                        timeNumList[3]++;
+                        break;
+                }
+                timeNumList[4]++; // 총 수
+            }
+            let ruleSleep6 = '수면 ' + timeNumList[4] + '번 중<br>'
+            for (let i = 0; i < timeIndexList.length; i++) {
+                ruleSleep6 += timeIndexList[i] + ': ' + timeNumList[i] + '번<br>'
+            }
+
+            $("#rule_sleep5").html(ruleSleep6);
+            score.sleep[0].scores.push(timeNumList[0] / timeNumList[4])
+            score.sleep[1].scores.push(timeNumList[2] / timeNumList[4])
+            score.sleep[2].scores.push(timeNumList[3] / timeNumList[4])
+
+            //규칙-수면7 : 수면 횟수 분포
+            let ruleSleep7 = manager.getSleepNum();
+            const numberIndexList = ['4번 이상', '2-4번', '0-2번']
+            const NumList = [0, 0, 0, 0]
+            for (const sleep_Num of ruleSleep7) {
+                switch (true) {
+                    // 수면 횟수별 날짜 수
+                    case (sleep_Num >= 4):
+                        NumList[0]++;
+                        break;
+                    case (sleep_Num >= 2) && (sleep_Num < 4) :
+                        NumList[1]++;
+                        break;
+                    case (sleep_Num >= 0) && (sleep_Num < 2) :
+                        NumList[2]++;
+                        break;
+                }
+                NumList[3]++; // 총 수
+            }
+            let rule_sleep6 = '총 ' + NumList[3] + '일 중<br>'
+            for (let i = 0; i < numberIndexList.length; i++) {
+                rule_sleep6 += numberIndexList[i] + ': ' + NumList[i] + '번<br>'
+            }
+            $("#rule_sleep6").html(rule_sleep6);
+            score.sleep[2].scores.push(NumList[0] / NumList[3]);
+
+
+            // 규칙-식사1 : 하루 중 오후 7시 이후 섭취하는 음식 비율 (오후 7시 - 새벽 3시라고 가정)
+            let ruleFood1 = manager.getRatio_LateMeal();
+            $("#rule_food1").html('총 ' + ruleFood1[1] + '회 중 ' + ruleFood1[0] + '회<br>비율: ' + ((ruleFood1[0] / ruleFood1[1]).toFixed(2)) * 100 + '%')
+            score.food[0].scores.push(ruleFood1[0] / ruleFood1[1])
+
+            // 규칙-식사2 : 식사 후 기분 분석 -> '매우 부정' '부정'이 많을수록 거식증, 폭식증이라고 추론
+            for (i = 0; i < 6; i++) {
+                emotionNumList[i] = 0;
+            }
+            EmotionList = manager.getEmotionAfterMeal()
+            for (const emotion of EmotionList) {
+                for (const emotionIndex of emotionIndexList) {
+                    if (emotionIndex == emotion) {
+                        emotionNumList[emotionIndexList.indexOf(emotion)]++     // 특정 개수
+                    }
+                }
+                emotionNumList[5]++     // 총 개수
+            }
+            let ruleFood2 = '총 ' + emotionNumList[5] + '번 중<br>'
+            console.log(emotionNumList);
+            for (i = 0; i < emotionIndexList.length; i++) {
+                ruleFood2 += emotionIndexList[i] + ': ' + emotionNumList[i] + '번<br>'
+            }
+            $("#rule_food2").html(ruleFood2);
+            score.food[1].scores.push((emotionNumList[0] + emotionNumList[1]) / emotionNumList[5])
+            score.food[2].scores.push((emotionNumList[0] + emotionNumList[1]) / emotionNumList[5])
+
+            //규칙-식사3 : 식사활동의 주기를 분석 - 짧으면 폭식증 의심
+            var interval_list = manager.getFoodInterval();
+            var intervalIndex = ['0-2시간', '3-5시간', '6-8시간', '9-12시간', '12~시간'];
+            var intervalNum = [0, 0, 0, 0, 0, 0];
+            // console.log("interval_list")
+            // console.log(interval_list)
+
+            for (interval of interval_list) {
+                switch (true) {
+                    case interval >= 0 && interval < 3 :
+                        intervalNum[0]++;
+                        break;
+                    case interval >= 3 && interval < 6 :
+                        intervalNum[1]++;
+                        break;
+                    case interval >= 6 && interval < 9 :
+                        intervalNum[2]++;
+                        break;
+                    case interval >= 9 && interval < 12 :
+                        intervalNum[3]++;
+                        break;
+                    case interval >= 12 :
+                        intervalNum[4]++;
+                        break;
+                }
+                intervalNum[5]++;
+            }
+            //console.log(intervalNum);
+            var ruleFood3 = '총 ' + (intervalNum[5] + 1) + '번의 식사들의 간격<br>';
+            for (var i = 0; i < intervalIndex.length; i++) {
+                ruleFood3 += intervalIndex[i] + ": " + intervalNum[i] + '번<br>';
+            }
+            $('#rule_food3').html(ruleFood3);
+            score.food[2].scores.push(intervalNum[0] / intervalNum[5]);
+
+            //규칙-식사4
+            var hungerlist = manager.getEatWhileFull();
+            $('#rule_food4').html('총 ' + hungerlist[1] + '번의 식사 중 ' + hungerlist[0] + '번은 배가 고프지 않았다.' + '(약 ' + (hungerlist[0] / hungerlist[1] * 100).toFixed(0) + '%)')
+            score.food[2].scores.push(hungerlist[0] / hungerlist[1]);
+
+            // 규칙-활동1: 만나는 사람의 다양성
+            const ruleActivity1 = manager.getPeople()
+            let ruleActivity1Result = '총 ' + ruleActivity1[0] + '회의 활동 중<br>'
+            for (let i = 1; i < ruleActivity1.length; i++) {
+                ruleActivity1Result += ruleActivity1[i][0] + ': ' + ruleActivity1[i][1] + '회<br>'
+            }
+            $('#rule_activity1').html(ruleActivity1Result)
+            let alone = 0;
+            for (let i = 1; i < ruleActivity1.length; i++) {
+                if (ruleActivity1[i][0] == '혼자') {
+                    alone = ruleActivity1[i][1];
+                    break;
+                }
+            }
+            score.activity[2].scores.push(alone / ruleActivity1[0])
+            score.activity[3].scores.push(1 - (alone / ruleActivity1[0]))
+            score.activity[5].scores.push(1 - (alone / ruleActivity1[0]))
+            score.activity[4].scores.push(alone / ruleActivity1[0])
+
+
+            // 규칙-활동2: 머무르는 장소의 온도 분포
+            const ruleActivity2 = manager.getTemperature()
+            console.log('ruleActivity2')
+            console.log(ruleActivity2)
+            const tempList = ['매우 낮음', '낮음', '보통', '높음', '매우 높음']
+            let ruleActivity2Result = ''
+            for (let i = 0; i < ruleActivity2.length; i++) {
+                ruleActivity2Result += tempList[i] + ': ' + ruleActivity2[i] + '회<br>'
+            }
+            $('#rule_activity2').html(ruleActivity2Result)
+
+
+            // 규칙-활동3: 실내/실외
+            const ruleActivity3 = manager.getInOut()
+            let ruleActivity3Result = '총 ' + (ruleActivity3[0][5] + ruleActivity3[1][5]) + '회의 활동 중<br>실내 ' + ruleActivity3[0][5] + '회<br>'
+            for (let i = 0; i < ruleActivity3[0].length - 1; i++) {
+                ruleActivity3Result += emotionIndexList[i] + ': ' + ruleActivity3[0][i] + '회<br>'
+            }
+            ruleActivity3Result += '실외 ' + ruleActivity3[1][5] + '회<br>'
+            for (let i = 0; i < ruleActivity3[1].length - 1; i++) {
+                ruleActivity3Result += emotionIndexList[i] + ': ' + ruleActivity3[1][i] + '회<br>'
+            }
+            $('#rule_activity3').html(ruleActivity3Result)
+            score.activity[0].scores.push((ruleActivity3[0][3] + ruleActivity3[0][4]) / ruleActivity3[0][5])
+            score.activity[1].scores.push((ruleActivity3[1][3] + ruleActivity3[1][4]) / ruleActivity3[1][5])
+
+            //규칙-활동4: 혼자 밥을 먹는 빈도
+            const ruleActivity4 = manager.eatAlone()
+            $('#rule_activity4').html('총' + ruleActivity4[2] + '회 식사 중<br>혼자: ' + ruleActivity4[0] + '회<br>함께: ' + ruleActivity4[1] + '회')
+            score.activity[4].scores.push(ruleActivity4[0] / ruleActivity4[2])
+            score.activity[5].scores.push(ruleActivity4[1] / ruleActivity4[2])
+
+            // 점수 발표
+            console.log('score');
+            console.log(score);
+            const category = ["수면", "식사", "활동"]
+            let m = 0;
+            let result_score = '';
+            for (i in score) {
+                result_score += "< " + category[m] + ' ><br>';
+                for (var j of score[i]) {
+                    console.log(i)
+                    //j는 sleep, food, activity의 원소니까 json 형식
+                    console.log(j)
+                    let real_score = 0;
+                    for (var k = 0; k < j.scores.length; k++) {
+                        real_score += j.scores[k];
+                    }
+                    real_score = (real_score / j.scores.length).toFixed(2);
+                    result_score += j.type + " : " + real_score + "<br>";
+                }
+                m++;
+            }
+            console.log(result_score);
+            $("#result").html(result_score);
+
+
+            // 서브 그래프
+            var options = {
+                nodes: {
+                    shape: 'dot',
+                    color: 'rgba(50, 50, 50, 1)',
+                    size: 16
+                },
+                layout: {
+                    randomSeed: 20,
+                    improvedLayout: true
+                },
+                physics: true,
+                interaction: {
+                    tooltipDelay: 200,
+                    hideEdgesOnDrag: false
+                }
+            };
+
+            // 서브그래프-수면1: 기상 직후 부정적인 감정을 느낀다
+            const activity = manager.gss['activity']
+            const sleep = manager.gss['sleep']
+            const subNodes_sleep = []
+            const subEdges_sleep = []
+            const sleepEndTimes = [];
+            for (const sleepStartTime of sleep.children_list) {
+                sleepEndTimes.push(sleepStartTime.getChildByAttr('end_time').value)
+            }
+            subNodes_sleep.push({id: 'sleep', label: 'sleep'})
+            for(const sleepEndTime of sleepEndTimes) {
+                for (var i = 0; i < activity.children_list.length; i++) {
+                    if (activity.children_list[i].value == sleepEndTime) {
+                        subNodes_sleep.push({id: sleepEndTime, label: sleepEndTime})
+                        subEdges_sleep.push({from: 'sleep', to: sleepEndTime})
+                        const emotion = activity.children_list[i].getChildByAttr('emotion').value
+                        var flag = true;
+                        loop1:
+                            while(flag){
+                                for(var node of subNodes_sleep){
+                                    if(node.id == emotion){
+                                        subEdges_sleep.push({from:sleepEndTime, to: node.id})
+                                        break loop1;
+                                    }
+                                }
+                                subNodes_sleep.push({id: emotion, label: emotion})
+                                subEdges_sleep.push({from: sleepEndTime, to: sleepEndTime + "|" + emotion})
+                                flag=false;
+                            }
+                    }
+                }
+            }
+            var subContainer = document.getElementById('subgraph_sleep1')
+            var subData = {nodes: new vis.DataSet(subNodes_sleep), edges: new vis.DataSet(subEdges_sleep)}
+            var subNetwork = new vis.Network(subContainer,subData,options)
+
+
+            // 서브그래프-식사1: 식사를 할 때 부정적인 감정을 느낀다
+            const food = manager.gss['food']
+            const sub2Nodes = []
+            const sub2Edges = []
+            sub2Nodes.push({id: 'food', label: 'food'})
+            var que=0;
+            for (const foodStartTime of food.children_list) {
+                {
+                    sub2Nodes.push({id: foodStartTime.value + que, label:foodStartTime.value})
+                    sub2Edges.push({from: 'food', to: foodStartTime.value + que})
+                    const emotion = foodStartTime.getChildByAttr('emotion').value
+                    var flag = true;
+                    loop2:
+                        while(flag){
+                            for(var node of sub2Nodes){
+                                if(node.id == emotion){
+                                    sub2Edges.push({from:foodStartTime.value+que, to: node.id})
+                                    break loop2;
+                                }
+                            }
+
+                            sub2Nodes.push({id: emotion, label: emotion})
+                            sub2Edges.push({from: foodStartTime.value + que, to:emotion})
+                            flag=false;
+                        }
+                    // sub2Nodes.push({id: foodStartTime.value + emotion, label: emotion})
+                    // sub2Edges.push({from: foodStartTime.value, to: foodStartTime.value + emotion})
+                }
+                que++;
+            }
+            var sub2Container = document.getElementById('subgraph_food1')
+            var sub2Data = {nodes: new vis.DataSet(sub2Nodes), edges: new vis.DataSet(sub2Edges)}
+            var sub2Options = {};
+            var sub2Network = new vis.Network(sub2Container, sub2Data, options)
+
+            // 서브그래프-식사2: 오후 7시 이후에 음식을 자주 섭취
+            const food1 = manager.gss['food']
+            const subNodes_food = []
+            const subEdges_food = []
+            subNodes_food.push({id: 'food', label: 'food'})
+            var i=0;
+            for(const foodtime of food1.children_list) {
+                var food_time = foodtime.value.split(' ')[1]
+                var food_hour = food_time.split(":")[0]
+                if(food_hour >= 19){
+                    subNodes_food.push({id:foodtime.value + i, label: foodtime.value, group:1})
+                    subEdges_food.push({from:"food", to:foodtime.value + i})
+                }
+                else{
+                    subNodes_food.push({id:foodtime.value + i, label: foodtime.value, group:2})
+                    subEdges_food.push({from:"food", to:foodtime.value + i})
+                }
+                i++
+            }
+            var subContainer_food_1 = document.getElementById('subgraph_food2')
+            var subData_food_1 = {nodes: new vis.DataSet(subNodes_food), edges: new vis.DataSet(subEdges_food)}
+            var subOptions_food_1 = {
+                nodes: {
+                    shape: 'dot',
+                    color: 'rgba(50, 50, 50, 1)',
+                    size: 16
+                },
+                layout: {
+                    randomSeed: 20,
+                    improvedLayout: true
+                },
+                physics: true,
+                interaction: {
+                    tooltipDelay: 200,
+                    hideEdgesOnDrag: false
+                },
+                groups: { 1: {color:{background:'red'}}, 2: {color:{background:'yellow'}}}}
+            var subNetwork = new vis.Network(subContainer_food_1,subData_food_1,subOptions_food_1)
+
+            // 서브그래프-활동1: 혼자 식사하는 비율
+            const activity2 = manager.gss['food']
+            const subNodes_eat = []
+            const subEdges_eat = []
+            subNodes_eat.push({id: 'eat', label: 'eat'})
+            var ques=0;
+            for(const foodtime of activity2.children_list) {
+                subNodes_eat.push({id:foodtime.value + ques, label:foodtime.value + ques})
+                subEdges_eat.push({from:'eat', to:foodtime.value + ques})
+                if(foodtime.getChildByAttr('person').value =="혼자"){
+                    subNodes_eat.push({id:foodtime.value + ques + "혼자", label: foodtime.value, group:1})
+                    subEdges_eat.push({from:foodtime.value + ques, to:foodtime.value + ques + "혼자"})
+                }
+                else{
+                    subNodes_eat.push({id:foodtime.value + ques + "함께", label: foodtime.value, group:2})
+                    subEdges_eat.push({from:foodtime.value + ques, to:foodtime.value + ques + "함께"})
+                }
+                ques++
+            }
+            var subContainer_eat = document.getElementById('subgraph_activity1')
+            var subData_eat = {nodes: new vis.DataSet(subNodes_eat), edges: new vis.DataSet(subEdges_eat)}
+            var subOptions_eat = {
+                nodes: {
+                    shape: 'dot',
+                    color: 'rgba(50, 50, 50, 1)',
+                    size: 16
+                },
+                layout: {
+                    randomSeed: 20,
+                    improvedLayout: true
+                },
+                physics: true,
+                interaction: {
+                    tooltipDelay: 200,
+                    hideEdgesOnDrag: false
+                },
+                groups: { 1: {color:{background:'red'}}, 2: {color:{background:'yellow'}}}}
+            var subNetwork_eat = new vis.Network(subContainer_eat,subData_eat,subOptions_eat)
+
+
+        }
+
+        //fuction4: 서치 결과 리턴. Go버튼 누를 시 작동.
+        function loadSearchResult(){
+            //pattern search 결과
+            let searchResult = manager.searchNode($("#gss").val(),$("#date-hour").val(), $("#attribute").val())
+                .map(([startsAt, endsAt, value]) => `${startsAt} ~ ${endsAt} : ${value}`)
+                .join("<br>");
+
+            $("#searchResult").html(searchResult);
+        }
+
+        //fuction5: 모든 노드, 엣지 초기화 (시각적으로 루트노드만 보여짐). reset 버튼 누를 시 작동.
+        function resetAllNodes() {
+            if (network != null) {
+                network.destroy();
+                network = null;
+            }
+            var keyword = null;
+            try {
+                var keywordValue = document.getElementById('keyword').value;
+                keyword = keywordValue.split(',');
+                if(keyword[0] == ""){
+                    keyword = null;
+                }
+            } catch (err) {
+                keyword = ['Root'];
+            }
+
+            var tempNode = [];
+            var tempEdge = [];
+
+            tempNode.push({id: (manager.root.attribute + manager.root.value), label: manager.root.value});
+            nodes = new vis.DataSet(tempNode);
+            nodes.color = 'rgba(200,200,200,0.5)';
+            edges = new vis.DataSet(tempEdge);
+            draw_network();
+            manager.root.displayed = true;
+        }
+
+        //fuction6: GUI상의 노드 클릭시 해당노드의 child node를 추가하는 함수
+        function addNode(params) {
+            // 클릭된 노드 정보 없을 경우 중단
+            if (params["nodes"].length === 0) {
+                return;
+            }
+            console.log('params')
+            console.log(params)
+            // 클릭된 노드의 정보 불러오기
+            const self_id = params['nodes'][0];
+            const self = manager.getNodeById(remove_index(self_id));
+            // 클릭된 노드가 자식 노드를 가지고 있지 않은 경우 중단
+            if (self.children_list.length === 0) {
+                return;
+            }
+            // 클릭된 횟수 정보가 없는 경우 초기화
+            if (self.open_count === undefined) {
+                self.open_count = 0;
+            }
+            // 자식 노드들에서 중복된 ID가 발생하지 않도록 전처리
+            self.children_list.forEach((child_a, index_a, array) => {
+                if (child_a.id === undefined) {
+                    let index = 0;
+
+                    for (let index_b = 0; index_b < index_a; index_b++) {
+                        const child_b = array[index_b];
+
+                        if ((child_a.attribute === child_b.attribute && child_a.value === child_b.value)) {
+                            index++;
+                        }
+                    }
+                    child_a.id = `${child_a.attribute}${child_a.value}|${index}`
+                }
+            });
+            // 표시할 노드/엣지 정보를 읽어오고
+            // 이미 표시된 노드들을 제거
+            let tempNodes = [];
+            let tempEdges = [];
+            self.children_list.forEach((child) => {
+                remove_child_node(self, child);
+                tempNodes.push({id: child.id, label: child.value});
+                tempEdges.push({id: get_edge_id(self, child), from: self_id, to: child.id});
+            });
+            // 읽어온 노드/엣지 정보 중에서 클릭 횟수에 따른 15개만 추리기
+            if (tempNodes.length > self.open_count * 15) {
+                tempNodes = tempNodes.slice(self.open_count * 15, self.open_count * 15 + 15);
+                tempEdges = tempEdges.slice(self.open_count * 15, self.open_count * 15 + 15);
+                self.open_count++;
+            } else {
+                tempNodes = tempNodes.slice(0, 15);
+                tempEdges = tempEdges.slice(0, 15);
+                self.open_count = 1;
+            }
+            // 화면에 표시
+            nodes.add(tempNodes);
+            edges.add(tempEdges);
+
+
+            console.log('nodes')
+            console.log(nodes)
+        }
+
+        //fuction7: NetworkManager와 Vis.Dataset의 서로 다른 ID를 정규화하는 함수
+        function remove_index(id) {
+            return id.split("|", 2)[0];
+        }
+
+        //fuction8: Vis.Dataset의 edge ID를 반환
+        function get_edge_id(from, to) {
+            return `${from.id}|${to.id}`;
+        }
+
+        //fuction9: 반복 클릭에 의해 제거되지 않던 child node 재귀적으로 제거
+        function remove_child_node(parent_node, child_node) {
+            for (const node of child_node.children_list) {
+                remove_child_node(child_node, node)
+            }
+
+            nodes.remove(child_node.id);
+
+            edges.remove(get_edge_id(parent_node, child_node));
+        }
+
+    </script>
+</head>
+
+<body>
+<div class="wrapper">
+    <div class="viewer">
+        <div id="networkViewer"></div>
+        <div id="timeline_visualization"></div>
+    </div>
+
+    <div class="panel">
+        <h1>Keyword Input</h1>
+        <div class="group">
+            <div class="row">
+                <div class="label">Date</div>
+                <input class="fit" id="date">
+            </div>
+            <div class="row">
+                <div class="label">Person Index</div>
+                <input id="personIndex" class="fit" type="number" step="1" min="0" value="1">
+            </div>
+            <div class="row">
+                <div class="label">Data</div>
+                <button class="fit" id="loadNode" onclick="loadData();">Load</button>
+                <button class="fit" id="resetNode" onclick="resetAllNodes();" disabled>Reset</button>
+            </div>
+        </div>
+
+        <!--<h1>Pattern Search</h1>-->
+        <!--<div class="group">-->
+            <!--<div class="row">-->
+                <!--<input class="fit" id='gss' type="text" placeholder="gss">-->
+                <!--<input class="fit" id='date-hour' type="text" placeholder="yyyy-mm-dd-hour">-->
+                <!--<input class="fit" id='attribute' type="text" placeholder="attribute">-->
+                <!--<button class="fit" id="searchNode" onclick="loadSearchResult();" disabled>Go</button>-->
+            <!--</div>-->
+            <!--<div id="searchResult" class="rows"></div>-->
+        <!--</div>-->
+
+        <h1>Pattern Information</h1>
+        <div class="group last">
+            <!--규칙-수면1-->
+            <p><b>규칙-수면1: 기상 직후의 감정 분포</b></p>
+            <a id="rule_sleep1"></a>
+            <!--규칙-수면2-->
+            <p><b>규칙-수면2: 피로도가 가장 낮은 시간대</b></p>
+            <a id="rule_sleep2"></a>
+            <!--규칙-수면3-->
+            <p><b>규칙-수면3: 잠들기 직전 1시간 이내 스마트폰 30분 이상 사용 빈도</b></p>
+            <a id="rule_sleep3"></a>
+            <!--규칙-수면5-->
+            <p><b>규칙-수면4: 4시간 이하의 수면 횟수</b></p>
+            <a id="rule_sleep4"></a>
+            <!--규칙-수면6-->
+            <p><b>규칙-수면5: 수면 시작 시간 분포</b></p>
+            <a id="rule_sleep5"></a>
+            <!--규칙-수면7-->
+            <p><b>규칙-수면6: 하루 수면 횟수 분포</b></p>
+            <a id="rule_sleep6"></a>
+            <!--규칙-식사1-->
+            <p><b>규칙-식사1: 전체 음식 섭취 중 오후 7시 이후에 음식을 섭취하는 비율</b></p>
+            <a id="rule_food1"></a>
+            <!--규칙-식사2-->
+            <p><b>규칙-식사2: 음식을 섭취한 뒤 감정 분포</b></p>
+            <a id="rule_food2"></a>
+            <!--규칙-식사3-->
+            <p><b>규칙-식사3: 식사활동의 주기</b></p>
+            <a id="rule_food3"></a>
+            <!--규칙-식사4-->
+            <p><b>규칙-식사4: 배고프지 않은데 밥을 먹는 횟수</b></p>
+            <a id="rule_food4"></a>
+            <!--규칙-활동1-->
+            <p><b>규칙-활동1: 만나는 사람의 다양성</b></p>
+            <a id="rule_activity1"></a>
+            <!--규칙-활동2-->
+            <p><b>규칙-활동2: 머무르는 장소의 온도 분포</b></p>
+            <a id="rule_activity2"></a>
+            <!--규칙-활동3-->
+            <p><b>규칙-활동3: 실내/실외에 따른 감정 분포</b></p>
+            <a id="rule_activity3"></a>
+            <!--규칙-활동4-->
+            <p><b>규칙-활동4: 밥을 혼자 먹는 빈도 </b></p>
+            <a id="rule_activity4"></a>
+            <!--결과 점수-->
+            <p><b>경향성 결과</b></p>
+            <a id="result"></a>
+            <!--<p><b>서브그래프-수면2: </b></p>-->
+            <!--<div id="subgraph1"></div>-->
+            <p><b>서브그래프-수면1: 기상 직후 느끼는 감정이 부정적</b></p>
+            <div id="subgraph_sleep1"></div>
+            <p><b>서브그래프-식사1: 식사를 할 때 감정이 부정적</b></p>
+            <div id="subgraph_food1"></div>
+            <p><b>서브그래프-식사2: 오후 7시 이후에 음식을 자주 섭취<br>(red: 7시 이후, yellow: 7시 이전)</b></p>
+            <div id="subgraph_food2"></div>
+            <p><b>서브그래프-활동: 혼자 식사하는 비율<br>(red: 혼자, yellow: 함께)</b></p>
+            <div id="subgraph_activity1"></div>
+        </div>
+    </div>
+</div>
+</body>
+</html>
